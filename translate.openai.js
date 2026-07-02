@@ -17,6 +17,7 @@
 
 	// ===== 默认配置 =====
 	var DEFAULT_CONFIG = {
+		enabled: true,                                   // 总开关：true 大模型翻译，false 关闭走 Edge 原生
 		endpoint: '',                                    // 例 https://api.deepseek.com/v1/chat/completions
 		apiKey: '',
 		model: 'deepseek-chat',
@@ -119,7 +120,89 @@
 			this.cache.loadAll();
 			// 挂载关窗强制写入
 			this._installCloseHandler();
+			// 注册 translate.js 进度钩子（只注册一次）
+			this._installProgressHooks();
 			console.log('[translate.openai] 已激活，端点：' + (this.config.endpoint || '(未配置)') + '，模型：' + this.config.model);
+		},
+
+		// ===== 注册 translate.js 的渲染开始/结束钩子，用于进度显示 =====
+		_installProgressHooks: function(){
+			if(this._progressHooksInstalled) return;
+			this._progressHooksInstalled = true;
+			var self = this;
+			// 翻译开始（某个语种开始调 API）
+			if(typeof translate.listener !== 'undefined' && translate.listener.execute){
+				if(typeof translate.listener.execute.renderStartByApi !== 'undefined'){
+					translate.listener.execute.renderStartByApi.push(function(uuid, from, to){
+						self._onTranslateStart(uuid, from, to);
+					});
+				}
+				if(typeof translate.listener.execute.renderFinishByApi !== 'undefined'){
+					translate.listener.execute.renderFinishByApi.push(function(uuid, from, to){
+						self._onTranslateFinish(uuid, from, to);
+					});
+				}
+			}
+			// finally 兜底：translate.execute() 执行结束
+			if(typeof translate.lifecycle !== 'undefined' && translate.lifecycle.execute && translate.lifecycle.execute.finally){
+				translate.lifecycle.execute.finally.push(function(data){
+					// state 25 = 已发起所有翻译请求（不等响应）；其他退出状态视为完成
+					if(data && data.state !== 25 && data.state !== 1){
+						self._onTranslateFinally();
+					}
+				});
+			}
+			console.log('[translate.openai] 进度钩子已注册');
+		},
+
+		// ===== 翻译开始回调 =====
+		_onTranslateStart: function(uuid, from, to){
+			this.state.activeRequests = (this.state.activeRequests || 0) + 1;
+			this.statusBadge.setTranslating(true);
+			console.log('[translate.openai] 翻译开始 (活跃请求: ' + this.state.activeRequests + ')');
+		},
+
+		// ===== 翻译完成回调 =====
+		_onTranslateFinish: function(uuid, from, to){
+			this.state.activeRequests = Math.max(0, (this.state.activeRequests || 0) - 1);
+			if(this.state.activeRequests === 0){
+				this.statusBadge.setTranslating(false);
+				this.statusBadge.showCompleted();
+			}
+			console.log('[translate.openai] 翻译完成 (活跃请求: ' + this.state.activeRequests + ')');
+		},
+
+		// ===== finally 兜底 =====
+		_onTranslateFinally: function(){
+			// 如果 finally 触发但 activeRequests 还有，说明有异常，强制归零
+			if(this.state.activeRequests > 0){
+				console.warn('[translate.openai] finally 兜底：强制归零活跃请求 (' + this.state.activeRequests + ')');
+				this.state.activeRequests = 0;
+				this.statusBadge.setTranslating(false);
+			}
+		},
+
+		// ===== 关闭大模型，切到 Edge =====
+		disable: function(){
+			this.config.enabled = false;
+			translate.service.name = 'client.edge';
+			this.statusBadge.setMode('disabled');
+			this.statusBadge.setTranslating(false);
+			console.log('[translate.openai] 大模型翻译已关闭，切换到 Edge 原生翻译');
+		},
+
+		// ===== 重新开启大模型 =====
+		enable: function(){
+			this.config.enabled = true;
+			translate.service.name = 'openai';
+			this.state.consecutiveFailures = 0;
+			this.statusBadge.setMode('openai');
+			console.log('[translate.openai] 大模型翻译已重新开启');
+		},
+
+		// ===== 更新翻译批次进度（translate() 主函数调用）=====
+		_updateProgress: function(done, total){
+			this.statusBadge.updateProgress(done, total);
 		},
 
 		// ===== 获取当前目标语种 =====
@@ -319,16 +402,18 @@
 										}catch(e){}
 									}
 								}
-								completedBatches++;
-								console.log('[translate.openai] 批次 ' + completedBatches + '/' + totalBatches + ' 完成（' + batch.texts.length + ' 条）');
-								progressiveEmit();
-							})
-							.catch(function(err){
-								completedBatches++;
-								console.error('[translate.openai] 批次失败 startIndex=' + batch.startIndex, err);
-								self._recordFailure(err);
-								progressiveEmit();
-							});
+							completedBatches++;
+							console.log('[translate.openai] 批次 ' + completedBatches + '/' + totalBatches + ' 完成（' + batch.texts.length + ' 条）');
+							self._updateProgress(completedBatches, totalBatches);
+							progressiveEmit();
+						})
+						.catch(function(err){
+							completedBatches++;
+							console.error('[translate.openai] 批次失败 startIndex=' + batch.startIndex, err);
+							self._recordFailure(err);
+							self._updateProgress(completedBatches, totalBatches);
+							progressiveEmit();
+						});
 						pool.push(p);
 						p.then(function(){ removeDone(p); }, function(){ removeDone(p); });
 					})(batch);
@@ -927,11 +1012,18 @@
 				modal.id = 'translate-openai-modal';
 				modal.setAttribute('class','ignore');
 				modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:2147483647;display:none;font-family:sans-serif;';
-				modal.innerHTML =
-					'<div style="background:#fff;width:560px;max-height:90vh;overflow-y:auto;margin:40px auto;border-radius:8px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.3);color:#333;">' +
-						'<h2 style="margin:0 0 16px 0;font-size:20px;color:#333;">翻译设置 (OpenAI 兼容 API)</h2>' +
-						'<div style="margin-bottom:12px;"><label style="display:block;font-size:13px;color:#666;margin-bottom:4px;">API 端点 Endpoint</label>' +
-							'<input id="toa-endpoint" type="text" placeholder="https://api.deepseek.com/v1/chat/completions" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:14px;"></div>' +
+			modal.innerHTML =
+				'<div style="background:#fff;width:560px;max-height:90vh;overflow-y:auto;margin:40px auto;border-radius:8px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.3);color:#333;">' +
+					'<h2 style="margin:0 0 16px 0;font-size:20px;color:#333;">翻译设置 (OpenAI 兼容 API)</h2>' +
+					'<div style="margin-bottom:16px;padding:14px 16px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:8px;color:#fff;">' +
+						'<label style="display:flex;align-items:center;cursor:pointer;font-size:15px;font-weight:bold;">' +
+							'<input id="toa-enabled" type="checkbox" checked style="margin-right:10px;width:18px;height:18px;cursor:pointer;">' +
+							'启用大模型翻译</label>' +
+						'<div style="font-size:12px;margin-top:6px;opacity:0.9;">关闭后使用 Edge 浏览器原生翻译，配置保留不丢失，随时可重新开启。</div>' +
+					'</div>' +
+					'<div id="toa-config-area">' +
+					'<div style="margin-bottom:12px;"><label style="display:block;font-size:13px;color:#666;margin-bottom:4px;">API 端点 Endpoint</label>' +
+						'<input id="toa-endpoint" type="text" placeholder="https://api.deepseek.com/v1/chat/completions" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:14px;"></div>' +
 						'<div style="margin-bottom:12px;"><label style="display:block;font-size:13px;color:#666;margin-bottom:4px;">API Key</label>' +
 							'<input id="toa-apikey" type="password" placeholder="sk-..." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:14px;"></div>' +
 						'<div style="margin-bottom:12px;"><label style="display:block;font-size:13px;color:#666;margin-bottom:4px;">模型 Model</label>' +
@@ -977,15 +1069,31 @@
 						'<button id="toa-export" style="padding:6px 12px;background:#6c757d;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;margin-right:8px;">导出缓存到文件</button>' +
 						'<button id="toa-import" style="padding:6px 12px;background:#6c757d;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;margin-right:8px;">从文件导入缓存</button>' +
 						'<button id="toa-clear" style="padding:6px 12px;background:#dc3545;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;">清空缓存</button>' +
-						'<div id="toa-cache-result" style="font-size:12px;color:#666;margin-top:8px;"></div>' +
-					'</div>' +
-					'<div style="text-align:right;">' +
-						'<button id="toa-cancel" style="padding:8px 16px;background:#ccc;color:#333;border:none;border-radius:4px;cursor:pointer;font-size:14px;margin-right:8px;">取消</button>' +
-						'<button id="toa-save" style="padding:8px 16px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;">保存</button>' +
-					'</div>' +
-				'</div>';
+					'<div id="toa-cache-result" style="font-size:12px;color:#666;margin-top:8px;"></div>' +
+				'</div>' +
+				'</div>' +  <!-- toa-config-area 结束 -->
+				'<div style="text-align:right;">' +
+					'<button id="toa-cancel" style="padding:8px 16px;background:#ccc;color:#333;border:none;border-radius:4px;cursor:pointer;font-size:14px;margin-right:8px;">取消</button>' +
+					'<button id="toa-save" style="padding:8px 16px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;">保存</button>' +
+				'</div>' +
+			'</div>';
 				document.body.appendChild(modal);
 				this.modal = modal;
+
+				// 总开关联动：切换时禁用/启用下方配置区
+				var enabledCheckbox = modal.querySelector('#toa-enabled');
+				var configArea = modal.querySelector('#toa-config-area');
+				function updateConfigAreaStyle(){
+					if(enabledCheckbox.checked){
+						configArea.style.opacity = '1';
+						configArea.style.pointerEvents = 'auto';
+					}else{
+						configArea.style.opacity = '0.4';
+						configArea.style.pointerEvents = 'none';
+					}
+				}
+				enabledCheckbox.addEventListener('change', updateConfigAreaStyle);
+				updateConfigAreaStyle(); // 初始化
 
 				// 高级区折叠
 				var advToggle = modal.querySelector('#toa-adv-toggle');
@@ -1079,6 +1187,7 @@
 			var cfg = this.load();
 			if(!cfg) cfg = {};
 			var m = this.modal;
+			if(m.querySelector('#toa-enabled')) m.querySelector('#toa-enabled').checked = (cfg.enabled !== false);
 			if(m.querySelector('#toa-endpoint')) m.querySelector('#toa-endpoint').value = cfg.endpoint || '';
 			if(m.querySelector('#toa-apikey')) m.querySelector('#toa-apikey').value = cfg.apiKey || '';
 			if(m.querySelector('#toa-model')) m.querySelector('#toa-model').value = cfg.model || 'deepseek-chat';
@@ -1092,11 +1201,20 @@
 			if(m.querySelector('#toa-context-limit')) m.querySelector('#toa-context-limit').value = cfg.contextLimit !== undefined ? cfg.contextLimit : 300;
 			if(m.querySelector('#toa-context-window')) m.querySelector('#toa-context-window').value = cfg.contextWindow !== undefined ? cfg.contextWindow : 5;
 			if(m.querySelector('#toa-prompt')) m.querySelector('#toa-prompt').value = cfg.promptTemplate || translate.service.openai.config.promptTemplate;
+			// 触发总开关样式更新
+			var enabledCb = m.querySelector('#toa-enabled');
+			var configArea = m.querySelector('#toa-config-area');
+			if(enabledCb && configArea){
+				configArea.style.opacity = enabledCb.checked ? '1' : '0.4';
+				configArea.style.pointerEvents = enabledCb.checked ? 'auto' : 'none';
+			}
 		},
 
 saveAndApply: function(){
 			var m = this.modal;
+			var enabled = m.querySelector('#toa-enabled') ? m.querySelector('#toa-enabled').checked : true;
 			var cfg = {
+				enabled: enabled,
 				endpoint: m.querySelector('#toa-endpoint').value.trim(),
 				apiKey: m.querySelector('#toa-apikey').value.trim(),
 				model: m.querySelector('#toa-model').value.trim() || 'deepseek-chat',
@@ -1107,22 +1225,27 @@ saveAndApply: function(){
 				progressiveOutput: m.querySelector('#toa-progressive') ? m.querySelector('#toa-progressive').checked : false,
 				scene: m.querySelector('#toa-scene').value.trim() || '游戏文本翻译',
 				contextEnabled: m.querySelector('#toa-context-enabled') ? m.querySelector('#toa-context-enabled').checked : true,
-				contextLimit: m.querySelector('#toa-context-limit') ? parseInt(m.querySelector('#toa-context-limit').value,10) : 3000,
-				contextWindow: m.querySelector('#toa-context-window') ? parseInt(m.querySelector('#toa-context-window').value,10) : 15,
+				contextLimit: m.querySelector('#toa-context-limit') ? parseInt(m.querySelector('#toa-context-limit').value,10) : 300,
+				contextWindow: m.querySelector('#toa-context-window') ? parseInt(m.querySelector('#toa-context-window').value,10) : 5,
 				promptTemplate: m.querySelector('#toa-prompt').value.trim() || translate.service.openai.config.promptTemplate
 			};
 				try{
 					localStorage.setItem('translate_openai_config', JSON.stringify(cfg));
 				}catch(e){ console.error('[translate.openai] 保存配置失败', e); }
-				// 应用配置并激活
-				translate.service.openai.use(cfg);
-				// 如果当前是降级态，尝试立即恢复
-				if(translate.service.openai.state.mode === 'degraded'){
-					console.log('[translate.openai] 配置已更新，立即尝试恢复');
-					translate.service.openai._tryRecover(0);
+				// 根据总开关决定走大模型还是 Edge
+				if(enabled){
+					translate.service.openai.use(cfg);
+					if(translate.service.openai.state.mode === 'degraded'){
+						console.log('[translate.openai] 配置已更新，立即尝试恢复');
+						translate.service.openai._tryRecover(0);
+					}
+				}else{
+					// 关闭大模型，切到 Edge
+					translate.service.openai.use(cfg); // 仍然加载配置和缓存（缓存对 Edge 也有用）
+					translate.service.openai.disable();
 				}
 				this.hide();
-				console.log('[translate.openai] 配置已保存并应用');
+				console.log('[translate.openai] 配置已保存并应用（大模型' + (enabled ? '开启' : '关闭') + '）');
 			},
 
 			testConnection: function(){
@@ -1174,40 +1297,125 @@ saveAndApply: function(){
 			}
 		},
 
-		// ===== 状态徽章 =====
+		// ===== 状态徽章（含进度条）=====
 		statusBadge: {
 			el: null,
+			translating: false,       // 是否正在翻译
+			completedTimer: null,     // "翻译完成"提示的淡出计时器
 			build: function(){
 				if(this.el) return;
 				var el = document.createElement('div');
 				el.id = 'translate-openai-badge';
 				el.setAttribute('class','ignore translate-openai-badge');
-				el.style.cssText = 'position:fixed;right:64px;bottom:20px;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.5);color:#fff;padding:6px 12px;border-radius:18px;z-index:2147483647;font-size:12px;font-family:sans-serif;cursor:pointer;user-select:none;';
-				el.innerHTML = '<span class="dot" style="width:8px;height:8px;border-radius:50%;background:#28a745;display:inline-block;"></span><span class="label">大模型翻译中</span>';
+				el.style.cssText = 'position:fixed;right:64px;bottom:20px;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.6);color:#fff;padding:6px 12px;border-radius:18px;z-index:2147483647;font-size:12px;font-family:sans-serif;cursor:pointer;user-select:none;transition:all 0.3s ease;';
+				el.innerHTML =
+					'<span class="dot" style="width:8px;height:8px;border-radius:50%;background:#28a745;display:inline-block;flex-shrink:0;"></span>' +
+					'<span class="label" style="white-space:nowrap;">大模型翻译中</span>' +
+					'<span class="progress-wrap" style="display:none;align-items:center;gap:6px;">' +
+						'<span class="progress-bar" style="width:80px;height:6px;background:rgba(255,255,255,0.2);border-radius:3px;overflow:hidden;flex-shrink:0;">' +
+							'<span class="progress-fill" style="display:block;height:100%;width:0%;background:#28a745;border-radius:3px;transition:width 0.3s ease;"></span>' +
+						'</span>' +
+						'<span class="progress-text" style="font-size:11px;white-space:nowrap;opacity:0.85;">0/0</span>' +
+					'</span>';
 				var self = this;
 				el.addEventListener('click', function(){ translate.service.openai.settingsUI.show(); });
 				document.body.appendChild(el);
 				this.el = el;
 			},
+
 			setMode: function(mode){
 				if(!this.el) return;
 				var dot = this.el.querySelector('.dot');
 				var label = this.el.querySelector('.label');
+				var fill = this.el.querySelector('.progress-fill');
 				if(mode === 'openai'){
 					dot.style.background = '#28a745';
 					dot.style.animation = '';
 					label.textContent = '大模型翻译中';
 					label.style.color = '#fff';
+					if(fill) fill.style.background = '#28a745';
 					this.el.title = '当前使用 OpenAI 兼容大模型翻译';
 				}else if(mode === 'degraded'){
 					dot.style.background = '#dc3545';
 					dot.style.animation = 'translate-openai-blink 1.5s infinite';
 					label.textContent = '已降级·质量下降';
 					label.style.color = '#ffb3b3';
+					if(fill) fill.style.background = '#dc3545';
 					var reason = translate.service.openai.state.degradeReason || '未知原因';
 					var t = translate.service.openai.state.lastDegradedAt ? new Date(translate.service.openai.state.lastDegradedAt).toLocaleTimeString() : '';
 					this.el.title = '已降级到 Edge 浏览器翻译，质量下降\n原因：' + reason + '\n时间：' + t + '\n将自动探测恢复';
+				}else if(mode === 'disabled'){
+					dot.style.background = '#999';
+					dot.style.animation = '';
+					label.textContent = '已关闭·Edge翻译';
+					label.style.color = '#ccc';
+					if(fill) fill.style.background = '#999';
+					this.el.title = '大模型翻译已关闭，当前使用 Edge 浏览器原生翻译\n点击打开设置可重新开启';
 				}
+			},
+
+			// ===== 设置翻译中状态（显示/隐藏进度条区域）=====
+			setTranslating: function(isTranslating){
+				this.translating = isTranslating;
+				if(!this.el) return;
+				var progressWrap = this.el.querySelector('.progress-wrap');
+				if(!progressWrap) return;
+				if(isTranslating){
+					progressWrap.style.display = 'flex';
+					// 清除"翻译完成"提示
+					if(this.completedTimer){ clearTimeout(this.completedTimer); this.completedTimer = null; }
+					var label = this.el.querySelector('.label');
+					if(label){
+						var mode = translate.service.openai.state.mode;
+						if(mode === 'degraded') label.textContent = '翻译中...';
+						else if(mode === 'disabled') label.textContent = '翻译中...';
+						else label.textContent = '翻译中...';
+					}
+				}else{
+					progressWrap.style.display = 'none';
+					// 进度条归零
+					this.updateProgress(0, 0);
+					// 恢复 label 为常态
+					var label2 = this.el.querySelector('.label');
+					if(label2){
+						var mode2 = translate.service.openai.state.mode;
+						if(mode2 === 'degraded') label2.textContent = '已降级·质量下降';
+						else if(mode2 === 'disabled') label2.textContent = '已关闭·Edge翻译';
+						else label2.textContent = '大模型翻译中';
+					}
+				}
+			},
+
+			// ===== 更新进度条 =====
+			updateProgress: function(done, total){
+				if(!this.el) return;
+				var fill = this.el.querySelector('.progress-fill');
+				var text = this.el.querySelector('.progress-text');
+				if(!fill || !text) return;
+				var pct = total > 0 ? Math.round((done / total) * 100) : 0;
+				fill.style.width = pct + '%';
+				text.textContent = done + '/' + total;
+			},
+
+			// ===== 显示"翻译完成"提示（3 秒后淡出）=====
+			showCompleted: function(){
+				if(!this.el) return;
+				if(this.completedTimer){ clearTimeout(this.completedTimer); this.completedTimer = null; }
+				var label = this.el.querySelector('.label');
+				var dot = this.el.querySelector('.dot');
+				if(!label || !dot) return;
+				var prevText = label.textContent;
+				var prevColor = dot.style.background;
+				label.textContent = '✅ 翻译完成';
+				label.style.color = '#90ee90';
+				dot.style.background = '#90ee90';
+				var self = this;
+				this.completedTimer = setTimeout(function(){
+					// 恢复常态
+					var mode = translate.service.openai.state.mode;
+					self.setMode(mode);
+					self.completedTimer = null;
+				}, 3000);
 			}
 		},
 
