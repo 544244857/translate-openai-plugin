@@ -276,14 +276,27 @@ window.addEventListener('load', function() {
 
 ### 📁 文件位置
 
+插件会按以下优先级自动探测可用的缓存存储方式：
+
+| 优先级 | 模式 | 文件位置 | 条件 |
+|:---|:---|:---|:---|
+| 1️⃣ | **插件目录模式** | `{插件所在目录}/TranslateCache/{语种}.json` | Node fs 可用 |
+| 2️⃣ | **IPC 模式** | `{userData}/GameData/TranslateCache_{语种}.json` | Electron 提供 `window.electronAPI` |
+| 3️⃣ | **userData 模式** | `{userData}/TranslateCache/{语种}.json` | Electron remote 可用 |
+| 4️⃣ | **localStorage 模式** | 浏览器内置 LevelDB | 以上均不可用 |
+
+> 💡 **自动探测**：插件会自动选择当前环境可用的最佳模式，无需手动配置。控制台启动时会打印实际使用的缓存目录。
+
+**Electron 游戏（如 TiTS）**通常走 IPC 模式或插件目录模式：
 ```
-Windows: %APPDATA%/{应用名}/TranslateCache/{语种}.json
+# IPC 模式（通过 window.electronAPI）
+C:\Users\{用户名}\AppData\Roaming\tits\GameData\TranslateCache_chinese_simplified.json
+
+# 插件目录模式（Node fs 可用时）
+{游戏目录}\resources\app\TranslateCache\chinese_simplified.json
 ```
 
-例如 TiTS 游戏：
-```
-C:\Users\{用户名}\AppData\Roaming\TiTS\TranslateCache\chinese_simplified.json
-```
+**普通网页**走 localStorage 模式（无文件缓存，仅浏览器内置缓存）。
 
 ### 📄 文件格式
 
@@ -372,10 +385,15 @@ translate.js 翻译前查 localStorage['hash_{to}_{hash}']
 <details>
 <summary><b>🔄 重启后缓存没有加载？</b></summary>
 
-检查控制台是否有 `[translate.openai] loadAll: 已加载 xxx 缓存 N 条`。如果没有：
-1. 确认缓存文件存在：`%APPDATA%/{应用名}/TranslateCache/*.json`
-2. 确认 `use()` 在 `translate.execute()` 之前调用
-3. 如果缓存文件为空，说明上次翻译时没写盘——检查关窗时是否有 `[translate.openai] 关窗强制写入缓存完成` 日志
+检查控制台启动时的日志，确认缓存模式：
+- `缓存模式：IPC` → 文件在 `{userData}/GameData/TranslateCache_*.json`
+- `缓存目录：xxx` → 文件在 `xxx/{语种}.json`
+- `Node fs 与 IPC 均不可用，缓存仅存 localStorage` → 无文件缓存，只有浏览器内置缓存
+
+如果没有加载日志：
+1. 确认 `use()` 在 `translate.execute()` 之前调用
+2. 确认控制台没有报错
+3. Electron 游戏确认 `preload.js` 暴露了 `window.electronAPI.saveFile/loadFile`
 
 </details>
 
