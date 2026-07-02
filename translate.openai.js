@@ -365,6 +365,9 @@
 			var completedBatches = 0;
 			var finalCallbackFired = false;
 			console.log('[translate.openai] 翻译请求开始，共 ' + textArray.length + ' 条文本，自适应分 ' + totalBatches + ' 批，并行上限 ' + this.config.maxConcurrency + (this.config.progressiveOutput ? '，渐进式输出已开启' : ''));
+			// 主动启动进度条显示（不完全依赖 translate.js 的 renderStartByApi 钩子）
+			this.statusBadge.setTranslating(true);
+			this._updateProgress(0, totalBatches);
 
 			// ===== 渐进式回调：用当前 results 构造输出数组（未完成的为 null）=====
 			function buildOutputArray(){
@@ -393,6 +396,8 @@
 				self.state.stats.successCount++;
 				// 最终回调：完整 results（无 null），translate.js 只收到这一次回调
 				func({result:1, info:'SUCCESS', from:from, to:to, text:results});
+				// 主动关闭进度条（兜底，不完全依赖 renderFinishByApi 钩子）
+				self.statusBadge.setTranslating(false);
 				// 确保缓存写盘
 				try{ self.cache.flush(); }catch(e){ console.warn('[translate.openai] 最终 flush 失败', e); }
 			}
