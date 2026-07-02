@@ -202,6 +202,34 @@
 			console.log('[translate.openai] 大模型翻译已重新开启');
 		},
 
+		// ===== 重新翻译本页 =====
+		retranslateCurrentPage: function(){
+			var self = this;
+			var to = translate.to || this._getCurrentTo();
+			if(!to){
+				console.warn('[translate.openai] 无法重新翻译：未设置目标语种');
+				alert('请先选择翻译目标语言');
+				return;
+			}
+			console.log('[translate.openai] 开始重新翻译本页，目标语种：' + to);
+			// 保存当前 to（reset 会清掉）
+			var savedTo = to;
+			// 用 translate.reset() 将页面恢复到原文
+			translate.reset({
+				selectLanguageRefreshRender: false, // 不刷新 select 下拉
+				notTranslateTip: true
+			});
+			// reset 清掉了 to，恢复
+			translate.to = savedTo;
+			translate.storage.set('to', savedTo);
+			// 重新执行翻译
+			// 给 DOM 一点时间恢复原文
+			setTimeout(function(){
+				translate.execute();
+				console.log('[translate.openai] 重新翻译已触发');
+			}, 300);
+		},
+
 		// ===== 更新翻译批次进度（translate() 主函数调用）=====
 		_updateProgress: function(done, total){
 			this.statusBadge.updateProgress(done, total);
@@ -970,21 +998,39 @@
 			gearButton: null,
 			modal: null,
 
-			buildGearButton: function(){
-				if(this.gearButton) return;
-				var btn = document.createElement('div');
-				btn.id = 'translate-openai-gear';
-				btn.setAttribute('class','ignore translate-openai-gear');
-				btn.innerHTML = '⚙';
-				btn.title = '翻译设置';
-				btn.style.cssText = 'position:fixed;right:20px;bottom:20px;width:36px;height:36px;line-height:36px;text-align:center;font-size:20px;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;z-index:2147483647;user-select:none;font-family:sans-serif;';
-				var self = this;
-				btn.addEventListener('click', function(){ self.show(); });
-				document.body.appendChild(btn);
-				this.gearButton = btn;
-			},
+		buildGearButton: function(){
+			if(this.gearButton) return;
+			var btn = document.createElement('div');
+			btn.id = 'translate-openai-gear';
+			btn.setAttribute('class','ignore translate-openai-gear');
+			btn.innerHTML = '⚙';
+			btn.title = '翻译设置';
+			btn.style.cssText = 'position:fixed;right:20px;bottom:20px;width:36px;height:36px;line-height:36px;text-align:center;font-size:20px;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;z-index:2147483647;user-select:none;font-family:sans-serif;';
+			var self = this;
+			btn.addEventListener('click', function(){ self.show(); });
+			document.body.appendChild(btn);
+			this.gearButton = btn;
+			// 同时创建"重新翻译本页"按钮
+			this.buildRetranslateButton();
+		},
 
-			show: function(){
+		// ===== 重新翻译本页按钮 =====
+		buildRetranslateButton: function(){
+			if(this.retranslateBtn) return;
+			var btn = document.createElement('div');
+			btn.id = 'translate-openai-retranslate';
+			btn.setAttribute('class','ignore translate-openai-retranslate');
+			btn.innerHTML = '🔄';
+			btn.title = '重新翻译本页（清除本页翻译缓存后重新翻译）';
+			btn.style.cssText = 'position:fixed;right:62px;bottom:20px;width:36px;height:36px;line-height:36px;text-align:center;font-size:18px;cursor:pointer;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;z-index:2147483647;user-select:none;font-family:sans-serif;display:flex;align-items:center;justify-content:center;transition:transform 0.3s ease,background 0.3s ease;';
+			btn.addEventListener('mouseenter', function(){ btn.style.background = 'rgba(40,167,69,0.7)'; btn.style.transform = 'scale(1.1)'; });
+			btn.addEventListener('mouseleave', function(){ btn.style.background = 'rgba(0,0,0,0.5)'; btn.style.transform = 'scale(1)'; });
+			btn.addEventListener('click', function(){ translate.service.openai.retranslateCurrentPage(); });
+			document.body.appendChild(btn);
+			this.retranslateBtn = btn;
+		},
+
+		show: function(){
 				if(this.modal){ this.modal.style.display = 'block'; this.refreshCacheStats(); return; }
 				this.buildModal();
 				this.modal.style.display = 'block';
@@ -1314,7 +1360,7 @@ saveAndApply: function(){
 				var el = document.createElement('div');
 				el.id = 'translate-openai-badge';
 				el.setAttribute('class','ignore translate-openai-badge');
-				el.style.cssText = 'position:fixed;right:64px;bottom:20px;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.6);color:#fff;padding:6px 12px;border-radius:18px;z-index:2147483647;font-size:12px;font-family:sans-serif;cursor:pointer;user-select:none;transition:all 0.3s ease;';
+				el.style.cssText = 'position:fixed;right:106px;bottom:20px;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.6);color:#fff;padding:6px 12px;border-radius:18px;z-index:2147483647;font-size:12px;font-family:sans-serif;cursor:pointer;user-select:none;transition:all 0.3s ease;';
 				el.innerHTML =
 					'<span class="dot" style="width:8px;height:8px;border-radius:50%;background:#28a745;display:inline-block;flex-shrink:0;"></span>' +
 					'<span class="label" style="white-space:nowrap;">大模型翻译中</span>' +
