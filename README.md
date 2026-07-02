@@ -161,7 +161,7 @@ translate.js 是一个优秀的开源国际化翻译方案，以"两行代码实
 
 #### 2️⃣ 引入插件脚本
 
-右键 `index.html` 使用记事本打开，在所有文本的最后面粘贴以下文本引入插件：
+右键 `index.html` 用记事本打开，在文件最末尾（`</body>` 标签之前）粘贴以下代码：
 
 ```html
 <!-- 第一步：引入 translate.js 库 -->
@@ -185,8 +185,14 @@ window.addEventListener('load', function() {
         } catch(e) { console.warn('读取翻译配置失败', e); }
 
         if (openaiCfg && openaiCfg.endpoint && openaiCfg.apiKey) {
-            // 已配置 → 启用大模型翻译
-            translate.service.openai.use(openaiCfg);
+            if (openaiCfg.enabled !== false) {
+                // 已配置且总开关开启 → 启用大模型翻译
+                translate.service.openai.use(openaiCfg);
+            } else {
+                // 已配置但总开关关闭 → 走 Edge 翻译，齿轮可用随时再开
+                translate.service.openai.use(openaiCfg);
+                translate.service.openai.disable();
+            }
         } else {
             // 未配置 → 降级使用 Edge 并弹出设置引导
             translate.service.use('client.edge');
@@ -202,6 +208,8 @@ window.addEventListener('load', function() {
 });
 </script>
 ```
+
+> 📝 **说明**：初始化代码会根据配置自动判断走哪条路——已配置且开启就大模型翻译，已配置但关闭就走 Edge，未配置就弹设置面板。保存配置后无需重启，设置面板里切换即生效。
 
 #### 3️⃣ 首次配置
 
