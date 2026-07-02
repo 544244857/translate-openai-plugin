@@ -1,27 +1,58 @@
-MIT License
+Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)
 
-Copyright (c) 2026 translate-openai-plugin contributors
+本插件 translate.openai.js 采用「署名-非商业性使用 4.0 国际」(CC BY-NC 4.0) 协议。
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+================================================================
+                        协议摘要（非法律文本）
+================================================================
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+你可以自由地：
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+  ✅ 共享 — 以任何媒介或格式复制、分发本作品
+  ✅ 修改 — 修改、改编、基于本作品创作新作品
 
----
+只要你遵守以下条款：
 
-Note: This plugin is built on top of translate.js (https://github.com/xnx3/translate)
-by 管雷鸣 (xnx3). translate.js is governed by its own license.
-This plugin does not modify translate.js and is not affiliated with the translate.js project.
+  📌 署名 — 你必须给出适当的署名，提供指向本协议的链接，
+            同时标明是否对原始作品做了修改。
+
+  🚫 非商业性使用 — 你不得将本作品用于商业目的。
+                    如需商业使用，必须事先获得作者授权。
+
+  🔗 不得附加限制 — 你不得适用法律术语或技术措施，
+                    限制他人做本协议允许的事。
+
+================================================================
+                        完整法律文本
+================================================================
+
+完整协议请访问：
+https://creativecommons.org/licenses/by-nc/4.0/legalcode.zh
+
+================================================================
+                        商业授权
+================================================================
+
+如需将本插件用于商业用途，请联系作者获取商业授权：
+
+  📧 联系方式：请通过 GitHub Issues 联系
+
+商业用途包括但不限于：
+  - 将本插件集成到商业产品中
+  - 将本插件作为服务提供
+  - 销售包含本插件的产品
+  - 以盈利为目的使用本插件
+
+================================================================
+                        依赖库声明
+================================================================
+
+本插件基于 translate.js (https://github.com/xnx3/translate) 构建，
+translate.js 遵循其原作者（管雷鸣 / xnx3）的开源协议。
+本插件不修改也不替代 translate.js，
+使用时请同时遵守 translate.js 的协议。
+
+================================================================
+
+作者：translate-openai-plugin contributors
+仓库：https://github.com/translate-openai-plugin/translate-openai-plugin
