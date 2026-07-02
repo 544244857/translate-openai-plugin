@@ -26,7 +26,7 @@
 		maxConcurrency: 5,                               // 并行池上限
 		requestTimeout: 60000,                           // 单请求超时 ms
 		scene: '游戏文本翻译',                            // 翻译场景，注入提示词
-		temperature: 0.3,
+		temperature: 0.6,
 		promptTemplate:                                  // 提示词模板，支持 {from}{to}{scene}{content}{sep}{context}{outputFormat}
 			'【角色】你是专业翻译家，当前翻译场景：{scene}。\n' +
 			'{context}' +
@@ -37,8 +37,10 @@
 			'2. 保持原文的换行、标点风格、HTML 占位符、变量名、数字编号格式；\n' +
 			'3. 不翻译已是中国大陆中文的原文，原样返回；\n' +
 			'4. 只输出翻译结果，禁止任何解释、注释、前后缀。\n'+
-			'5. 理解性翻译，而不是死板的生搬硬套。\n' +
-			'6. 你可以修改翻译的原意以增加可读性（即润色原文），只要符合大意。\n' +
+			'5. 追求地道、自然、流畅的译文，像母语者说话一样，而不是逐字翻译。\n' +
+			'6. 大胆润色：可以调整语序、补充省略词、使用成语俗语、转换语气，\n' +
+			'   让译文更有表现力和感染力，只要核心意思不变。\n' +
+			'7. 对于对话、俚语、情感表达，用符合语境的口语化表达，不要翻成书面语。\n' +
 			'【原文】\n{content}',
 		separator: '\n@@TiTS_SEP@@\n',                   // 批量分隔符（分隔符模式用）
 		outputFormat: 'json',                            // 'json' | 'separator'，默认 JSON 输出
@@ -1047,8 +1049,11 @@
 							'<input id="toa-progressive" type="checkbox" style="margin-right:8px;">渐进式输出（实验性，默认关，可能显示不完整）</label>' +
 						'<div style="font-size:11px;color:#997a04;margin-top:4px;">每批完成立即显示，但跟翻译引擎状态机有冲突，可能导致部分文本不显示。默认关闭，靠并行+自适应分批加速即可。</div>' +
 					'</div>' +
-					'<div style="margin-bottom:12px;"><label style="display:block;font-size:13px;color:#666;margin-bottom:4px;">翻译场景</label>' +
-						'<input id="toa-scene" type="text" value="游戏文本翻译" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:14px;"></div>' +
+				'<div style="margin-bottom:12px;"><label style="display:block;font-size:13px;color:#666;margin-bottom:4px;">翻译场景</label>' +
+					'<input id="toa-scene" type="text" value="游戏文本翻译" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:14px;"></div>' +
+				'<div style="margin-bottom:12px;"><label style="display:block;font-size:13px;color:#666;margin-bottom:4px;">温度 Temperature</label>' +
+					'<input id="toa-temperature" type="number" value="0.6" min="0" max="2" step="0.1" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:14px;">' +
+					'<div style="font-size:11px;color:#e8890c;margin-top:4px;">💡 建议 0.6，游戏文本推荐 0.5-0.7。值越高翻译越自由地道，越低越保守逐字。</div></div>' +
 					'<div style="margin-bottom:12px;padding:12px;background:#f0f7ff;border-radius:4px;border:1px solid #cce0ff;">' +
 						'<label style="display:flex;align-items:center;font-size:13px;color:#0066cc;cursor:pointer;margin-bottom:8px;">' +
 							'<input id="toa-context-enabled" type="checkbox" checked style="margin-right:8px;">启用上下文增强翻译</label>' +
@@ -1197,6 +1202,7 @@
 			if(m.querySelector('#toa-output-format')) m.querySelector('#toa-output-format').value = cfg.outputFormat || 'json';
 			if(m.querySelector('#toa-progressive')) m.querySelector('#toa-progressive').checked = (cfg.progressiveOutput === true);
 			if(m.querySelector('#toa-scene')) m.querySelector('#toa-scene').value = cfg.scene || '游戏文本翻译';
+			if(m.querySelector('#toa-temperature')) m.querySelector('#toa-temperature').value = cfg.temperature !== undefined ? cfg.temperature : 0.6;
 			if(m.querySelector('#toa-context-enabled')) m.querySelector('#toa-context-enabled').checked = (cfg.contextEnabled !== false);
 			if(m.querySelector('#toa-context-limit')) m.querySelector('#toa-context-limit').value = cfg.contextLimit !== undefined ? cfg.contextLimit : 300;
 			if(m.querySelector('#toa-context-window')) m.querySelector('#toa-context-window').value = cfg.contextWindow !== undefined ? cfg.contextWindow : 5;
@@ -1224,6 +1230,7 @@ saveAndApply: function(){
 				outputFormat: m.querySelector('#toa-output-format') ? m.querySelector('#toa-output-format').value : 'json',
 				progressiveOutput: m.querySelector('#toa-progressive') ? m.querySelector('#toa-progressive').checked : false,
 				scene: m.querySelector('#toa-scene').value.trim() || '游戏文本翻译',
+				temperature: parseFloat(m.querySelector('#toa-temperature').value) || 0.6,
 				contextEnabled: m.querySelector('#toa-context-enabled') ? m.querySelector('#toa-context-enabled').checked : true,
 				contextLimit: m.querySelector('#toa-context-limit') ? parseInt(m.querySelector('#toa-context-limit').value,10) : 300,
 				contextWindow: m.querySelector('#toa-context-window') ? parseInt(m.querySelector('#toa-context-window').value,10) : 5,
