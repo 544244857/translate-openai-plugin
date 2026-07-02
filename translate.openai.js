@@ -1600,61 +1600,110 @@ saveAndApply: function(){
 						}
 					}
 				}catch(e){
-					console.warn('[translate.openai] 缓存初始化失败，将仅用 localStorage', e);
+					console.warn('[translate.openai] 缓存初始化失败（fs 模式），尝试 IPC 模式', e);
 				}
-				// Node 不可用，仅用 localStorage 模式
-				this.initialized = true;
-				console.log('[translate.openai] Node fs 不可用，缓存仅存 localStorage');
-			},
-
-			// ===== 文件路径
-			_filePath: function(to){
-				if(!this._path || !this.dir) return null;
-				return this._path.join(this.dir, to + '.json');
-			},
-
-			// ===== 加载指定语种缓存 → 灌入 localStorage + memory =====
-			loadFor: function(to){
-				if(!to) return;
-				this.currentTo = to;
-				this.memory = {};
-				this.dirty = false;
-				if(this.writeTimer){ clearTimeout(this.writeTimer); this.writeTimer = null; }
-				if(!this._fs) return;
-				var fp = this._filePath(to);
-				if(!fp || !this._fs.existsSync(fp)){
-					console.log('[translate.openai] 缓存文件不存在：' + (fp || to) + '，从空开始');
-					return;
-				}
+				// fs 模式不可用，尝试用游戏提供的 IPC 文件接口（window.electronAPI）
 				try{
-					var raw = this._fs.readFileSync(fp, {encoding:'utf8'});
-					var data = JSON.parse(raw);
-					if(data && data.entries){
-						var count = 0;
-						for(var h in data.entries){
-							if(data.entries.hasOwnProperty(h)){
-								this.memory[h] = data.entries[h];
-								// 灌入 localStorage，让 translate.js 命中
-								try{ translate.storage.set('hash_' + to + '_' + h, data.entries[h]); }catch(e){}
-								count++;
-							}
-						}
-						console.log('[translate.openai] 已加载缓存：' + to + '，共 ' + count + ' 条');
+					if(typeof window !== 'undefined' && window.electronAPI && window.electronAPI.saveFile && window.electronAPI.loadFile){
+						this._useIPC = true;
+						this.initialized = true;
+						// IPC 模式下文件存在 {userData}/GameData/ 下，文件名用 TranslateCache_ 前缀
+						// saveFile 会自动加 .json 后缀
+						console.log('[translate.openai] 缓存模式：IPC（通过 window.electronAPI），文件存于 GameData/TranslateCache_*.json');
+						return;
 					}
 				}catch(e){
-					console.warn('[translate.openai] 缓存文件解析失败：' + fp + '，备份后从空开始', e);
-					// 备份损坏的文件
-					try{
-						var bak = fp + '.bak.' + Date.now();
-						this._fs.copyFileSync(fp, bak);
-						console.log('[translate.openai] 已备份损坏文件至 ' + bak);
-					}catch(e2){}
+					console.warn('[translate.openai] IPC 模式探测失败', e);
 				}
+				// fs 和 IPC 都不可用，仅用 localStorage
+				this.initialized = true;
+				console.log('[translate.openai] Node fs 与 IPC 均不可用，缓存仅存 localStorage');
 			},
 
-					// ===== 加载所有语种缓存文件（重启时调用，确保所有缓存都灌入 localStorage）=====
-			loadAll: function(){
-				if(!this._fs || !this.dir) return;
+		// ===== 文件路径（fs 模式）/ 文件名（IPC 模式）
+		_filePath: function(to){
+			if(this._useIPC){
+				// IPC 模式：返回文件名（不含路径，saveFile 会自动加 .json 后缀）
+				return 'TranslateCache_' + to;
+			}
+			if(!this._path || !this.dir) return null;
+			return this._path.join(this.dir, to + '.json');
+		},
+
+		// ===== 加载指定语种缓存 → 灌入 localStorage + memory =====
+		loadFor: function(to){
+			if(!to) return;
+			this.currentTo = to;
+			this.memory = {};
+			this.dirty = false;
+			if(this.writeTimer){ clearTimeout(this.writeTimer); this.writeTimer = null; }
+			// IPC 模式：异步加载
+			if(this._useIPC){
+				this._loadForIPC(to);
+				return;
+			}
+			if(!this._fs) return;
+			var fp = this._filePath(to);
+			if(!fp || !this._fs.existsSync(fp)){
+				console.log('[translate.openai] 缓存文件不存在：' + (fp || to) + '，从空开始');
+				return;
+			}
+			try{
+				var raw = this._fs.readFileSync(fp, {encoding:'utf8'});
+				var data = JSON.parse(raw);
+				if(data && data.entries){
+					var count = 0;
+					for(var h in data.entries){
+						if(data.entries.hasOwnProperty(h)){
+							this.memory[h] = data.entries[h];
+							try{ translate.storage.set('hash_' + to + '_' + h, data.entries[h]); }catch(e){}
+							count++;
+						}
+					}
+					console.log('[translate.openai] 已加载缓存：' + to + '，共 ' + count + ' 条');
+				}
+			}catch(e){
+				console.warn('[translate.openai] 缓存文件解析失败：' + fp + '，从空开始', e);
+			}
+		},
+
+		// ===== IPC 异步加载 =====
+		_loadForIPC: async function(to){
+			var fileName = this._filePath(to);
+			try{
+				// electronAPI.loadFile 返回的是已 JSON.parse 的对象
+				var data = await window.electronAPI.loadFile(fileName);
+				if(data && data.entries){
+					var count = 0;
+					for(var h in data.entries){
+						if(data.entries.hasOwnProperty(h)){
+							this.memory[h] = data.entries[h];
+							try{ translate.storage.set('hash_' + to + '_' + h, data.entries[h]); }catch(e){}
+							count++;
+						}
+					}
+					console.log('[translate.openai] IPC 已加载缓存：' + to + '，共 ' + count + ' 条');
+				}else{
+					console.log('[translate.openai] IPC 缓存文件不存在：' + fileName + '，从空开始');
+				}
+			}catch(e){
+				console.warn('[translate.openai] IPC 加载缓存失败：' + fileName, e);
+			}
+		},
+
+		// ===== 加载所有语种缓存文件（重启时调用，确保所有缓存都灌入 localStorage）=====
+		loadAll: function(){
+			// IPC 模式：尝试加载已知语种
+			if(this._useIPC){
+				var knownLangs = ['chinese_simplified','chinese_traditional','english','japanese','korean','french','german','spanish','russian'];
+				for(var i=0; i<knownLangs.length; i++){
+					if(knownLangs[i] !== this.currentTo){
+						this._loadForIPC(knownLangs[i]);
+					}
+				}
+				return;
+			}
+			if(!this._fs || !this.dir) return;
 				try{
 					var files = this._fs.readdirSync(this.dir);
 					var loaded = 0;
@@ -1709,7 +1758,7 @@ saveAndApply: function(){
 
 			// ===== 防抖调度写入 =====
 			scheduleFlush: function(){
-				if(!this._fs) return;
+				if(!this._fs && !this._useIPC) return;
 				if(this.writeTimer) clearTimeout(this.writeTimer);
 				var self = this;
 				this.writeTimer = setTimeout(function(){
@@ -1719,11 +1768,10 @@ saveAndApply: function(){
 
 			// ===== 异步写入文件 =====
 			flush: function(){
-				if(!this._fs || !this.dirty || !this.currentTo) return;
+				if(!this.dirty || !this.currentTo) return;
+				if(!this._fs && !this._useIPC) return;
 				this.writeTimer = null;
 				this.dirty = false;
-				var fp = this._filePath(this.currentTo);
-				if(!fp) return;
 				var data = {
 					version: 1,
 					to: this.currentTo,
@@ -1732,42 +1780,71 @@ saveAndApply: function(){
 					entries: this.memory
 				};
 				var jsonStr = JSON.stringify(data);
-				// 原子写：先写 .tmp 再 rename
+
+				// IPC 模式
+				if(this._useIPC){
+					var ipcFileName = this._filePath(this.currentTo);
+					var self = this;
+					window.electronAPI.saveFile(ipcFileName, jsonStr).then(function(ok){
+						if(!ok){
+							console.warn('[translate.openai] IPC 缓存写入失败');
+							self.dirty = true;
+						}
+					}).catch(function(e){
+						console.warn('[translate.openai] IPC 缓存写入异常', e);
+						self.dirty = true;
+					});
+					return;
+				}
+
+				// fs 模式：原子写
+				var fp = this._filePath(this.currentTo);
+				if(!fp) return;
 				var tmp = fp + '.tmp';
 				var self = this;
 				this._fs.writeFile(tmp, jsonStr, {encoding:'utf8'}, function(err){
 					if(err){
 						console.warn('[translate.openai] 缓存写入失败', err);
-						self.dirty = true; // 失败了重新标记 dirty，下次再写
+						self.dirty = true;
 						return;
 					}
 					self._fs.rename(tmp, fp, function(err2){
 						if(err2){
 							console.warn('[translate.openai] 缓存 rename 失败', err2);
-							// tmp 已写但 rename 失败，尝试直接复制
 							try{ self._fs.copyFileSync(tmp, fp); }catch(e){}
 						}
 					});
 				});
 			},
 
-			// ===== 同步写入（关窗时用，避免进程退出写一半）=====
+			// ===== 同步写入（关窗时用）=====
 			flushSync: function(){
-				if(!this._fs || !this.dirty || !this.currentTo) return;
+				if(!this.dirty || !this.currentTo) return;
+				if(!this._fs && !this._useIPC) return;
 				if(this.writeTimer){ clearTimeout(this.writeTimer); this.writeTimer = null; }
 				this.dirty = false;
+				var data = {
+					version: 1,
+					to: this.currentTo,
+					updatedAt: Date.now(),
+					count: Object.keys(this.memory).length,
+					entries: this.memory
+				};
+				var jsonStr = JSON.stringify(data);
+
+				// IPC 模式：异步但立即触发（关窗时碰运气）
+				if(this._useIPC){
+					var ipcFileName = this._filePath(this.currentTo);
+					try{ window.electronAPI.saveFile(ipcFileName, jsonStr); }catch(e){}
+					return;
+				}
+
+				// fs 模式：同步原子写
 				var fp = this._filePath(this.currentTo);
 				if(!fp) return;
 				try{
-					var data = {
-						version: 1,
-						to: this.currentTo,
-						updatedAt: Date.now(),
-						count: Object.keys(this.memory).length,
-						entries: this.memory
-					};
 					var tmp = fp + '.tmp';
-					this._fs.writeFileSync(tmp, JSON.stringify(data), {encoding:'utf8'});
+					this._fs.writeFileSync(tmp, jsonStr, {encoding:'utf8'});
 					this._fs.renameSync(tmp, fp);
 					console.log('[translate.openai] 关窗强制写入缓存完成：' + Object.keys(this.memory).length + ' 条');
 				}catch(e){
@@ -1780,32 +1857,39 @@ saveAndApply: function(){
 				return Object.keys(this.memory).length;
 			},
 
-			// ===== 统计：文件大小（字节）=====
-			size: function(){
-				if(!this._fs || !this.currentTo) return 0;
-				var fp = this._filePath(this.currentTo);
-				if(!fp || !this._fs.existsSync(fp)) return 0;
-				try{
-					var stat = this._fs.statSync(fp);
-					return stat.size;
-				}catch(e){ return 0; }
-			},
+		// ===== 统计：文件大小（字节）=====
+		size: function(){
+			if(!this.currentTo) return 0;
+			// IPC 模式：无法直接获取文件大小，用 memory 估算
+			if(this._useIPC){
+				return JSON.stringify(this.memory).length;
+			}
+			if(!this._fs) return 0;
+			var fp = this._filePath(this.currentTo);
+			if(!fp || !this._fs.existsSync(fp)) return 0;
+			try{
+				var stat = this._fs.statSync(fp);
+				return stat.size;
+			}catch(e){ return 0; }
+		},
 
-			// ===== 清空当前语种缓存 =====
-			clear: function(){
-				var to = this.currentTo;
-				if(!to) return false;
-				// 清 memory
-				this.memory = {};
-				this.dirty = false;
-				if(this.writeTimer){ clearTimeout(this.writeTimer); this.writeTimer = null; }
-				// 删文件
-				if(this._fs){
-					var fp = this._filePath(to);
-					if(fp && this._fs.existsSync(fp)){
-						try{ this._fs.unlinkSync(fp); }catch(e){}
-					}
+		// ===== 清空当前语种缓存 =====
+		clear: function(){
+			var to = this.currentTo;
+			if(!to) return false;
+			// 清 memory
+			this.memory = {};
+			this.dirty = false;
+			if(this.writeTimer){ clearTimeout(this.writeTimer); this.writeTimer = null; }
+			// 删文件
+			if(this._useIPC){
+				try{ window.electronAPI.deleteFile(this._filePath(to)); }catch(e){}
+			}else if(this._fs){
+				var fp = this._filePath(to);
+				if(fp && this._fs.existsSync(fp)){
+					try{ this._fs.unlinkSync(fp); }catch(e){}
 				}
+			}
 				// 清 localStorage 中 hash_{to}_*
 				try{
 					var keys = [];
