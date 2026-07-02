@@ -1498,8 +1498,10 @@ saveAndApply: function(){
 					if(typeof require === 'function'){
 						this._fs = require('fs');
 						this._path = require('path');
-						// 确定 userData 目录
+						// 确定 userData 目录（多种方式尝试）
 						var userData = null;
+
+						// 方式1：@electron/remote
 						try{
 							var remote = null;
 							try{ remote = require('@electron/remote'); }catch(e){}
@@ -1509,10 +1511,54 @@ saveAndApply: function(){
 								this._electronRemote = remote;
 							}
 						}catch(e){}
-						// 兜底：Windows %APPDATA%/{appName}
-						if(!userData && process.env.APPDATA){
-							userData = this._path.join(process.env.APPDATA, 'TiTS');
+
+						// 方式2：直接 require('electron').app（nodeIntegration 时有时可用）
+						if(!userData){
+							try{
+								var electron = require('electron');
+								if(electron && electron.app && electron.app.getPath){
+									userData = electron.app.getPath('userData');
+								}
+							}catch(e){}
 						}
+
+						// 方式3：兜底自动探测 %APPDATA% 下的游戏目录
+						if(!userData && process.env.APPDATA){
+							var appData = process.env.APPDATA;
+							// 尝试常见游戏目录名（大小写不敏感）
+							var candidates = ['tits', 'TiTS', 'Trials in Tainted Space'];
+							for(var ci=0; ci<candidates.length; ci++){
+								var testPath = this._path.join(appData, candidates[ci]);
+								if(this._fs.existsSync(testPath)){
+									// 验证：目录下应有 Local Storage 或 GameData 等游戏特征
+									if(this._fs.existsSync(this._path.join(testPath, 'Local Storage')) ||
+									   this._fs.existsSync(this._path.join(testPath, 'GameData')) ||
+									   this._fs.existsSync(this._path.join(testPath, 'ImagePack'))){
+										userData = testPath;
+										break;
+									}
+								}
+							}
+							// 如果没找到已知名字，扫描 %APPDATA% 下含 GameData 或 ImagePack 的目录
+							if(!userData){
+								try{
+									var dirs = this._fs.readdirSync(appData);
+									for(var di=0; di<dirs.length; di++){
+										var d = this._path.join(appData, dirs[di]);
+										try{
+											var stat = this._fs.statSync(d);
+											if(!stat.isDirectory()) continue;
+										}catch(e){ continue; }
+										if(this._fs.existsSync(this._path.join(d, 'GameData')) ||
+										   this._fs.existsSync(this._path.join(d, 'ImagePack'))){
+											userData = d;
+											break;
+										}
+									}
+								}catch(e){}
+							}
+						}
+
 						if(userData){
 							this.dir = this._path.join(userData, 'TranslateCache');
 							if(!this._fs.existsSync(this.dir)){
