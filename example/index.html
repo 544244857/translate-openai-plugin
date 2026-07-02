@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>translate.openai.js 示例</title>
+</head>
+<body>
+    <h1>Hello World</h1>
+    <p>This is a demo page for translate.openai.js plugin.</p>
+    <p>You can translate this page using any OpenAI-compatible API.</p>
+    <div id="translate"></div>
+
+    <!-- 第一步：引入 translate.js（需自行下载） -->
+    <script src="https://cdn.staticfile.net/translate.js/3.18.98/translate.js"></script>
+
+    <!-- 第二步：引入本插件 -->
+    <script src="./translate.openai.js"></script>
+
+    <!-- 第三步：初始化 -->
+    <script>
+    window.addEventListener('load', function() {
+        setTimeout(function() {
+            var openaiCfg = null;
+            try {
+                var raw = localStorage.getItem('translate_openai_config');
+                if (raw) openaiCfg = JSON.parse(raw);
+            } catch(e) {}
+
+            if (openaiCfg && openaiCfg.endpoint && openaiCfg.apiKey) {
+                translate.service.openai.use(openaiCfg);
+            } else {
+                translate.service.use('client.edge');
+                translate.service.openai.settingsUI.buildGearButton();
+                translate.service.openai.settingsUI.show();
+            }
+
+            translate.listener.start();
+            translate.execute();
+        }, 500);
+    });
+    </script>
+</body>
+</html>
