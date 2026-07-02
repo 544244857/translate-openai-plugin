@@ -1498,69 +1498,95 @@ saveAndApply: function(){
 					if(typeof require === 'function'){
 						this._fs = require('fs');
 						this._path = require('path');
-						// 确定 userData 目录（多种方式尝试）
-						var userData = null;
+						// 确定缓存目录，优先用插件自身所在目录（缓存跟着插件走，方便打包迁移）
+						var cacheBaseDir = null;
 
-						// 方式1：@electron/remote
+						// 方式1（推荐）：插件文件自身所在目录
 						try{
-							var remote = null;
-							try{ remote = require('@electron/remote'); }catch(e){}
-							if(!remote){ try{ remote = require('electron').remote; }catch(e){} }
-							if(remote && remote.app && remote.app.getPath){
-								userData = remote.app.getPath('userData');
-								this._electronRemote = remote;
-							}
-						}catch(e){}
-
-						// 方式2：直接 require('electron').app（nodeIntegration 时有时可用）
-						if(!userData){
-							try{
-								var electron = require('electron');
-								if(electron && electron.app && electron.app.getPath){
-									userData = electron.app.getPath('userData');
-								}
-							}catch(e){}
-						}
-
-						// 方式3：兜底自动探测 %APPDATA% 下的游戏目录
-						if(!userData && process.env.APPDATA){
-							var appData = process.env.APPDATA;
-							// 尝试常见游戏目录名（大小写不敏感）
-							var candidates = ['tits', 'TiTS', 'Trials in Tainted Space'];
-							for(var ci=0; ci<candidates.length; ci++){
-								var testPath = this._path.join(appData, candidates[ci]);
-								if(this._fs.existsSync(testPath)){
-									// 验证：目录下应有 Local Storage 或 GameData 等游戏特征
-									if(this._fs.existsSync(this._path.join(testPath, 'Local Storage')) ||
-									   this._fs.existsSync(this._path.join(testPath, 'GameData')) ||
-									   this._fs.existsSync(this._path.join(testPath, 'ImagePack'))){
-										userData = testPath;
+							// Electron renderer 中可用 __dirname 或 document.currentScript 获取脚本路径
+							var scriptDir = null;
+							try{ scriptDir = __dirname; }catch(e){}
+							if(!scriptDir){
+								// 通过 document.currentScript 获取
+								var scripts = document.getElementsByTagName('script');
+								for(var si=0; si<scripts.length; si++){
+									var src = scripts[si].src || '';
+									if(src.indexOf('translate.openai.js') > -1){
+										// 去掉文件名，得到目录
+										var parts = src.split(/[\/\\]/);
+										parts.pop();
+										scriptDir = parts.join(this._path.sep);
+										// 如果是 file:// 协议头，去掉
+										scriptDir = scriptDir.replace(/^file:\/\//i, '');
 										break;
 									}
 								}
 							}
-							// 如果没找到已知名字，扫描 %APPDATA% 下含 GameData 或 ImagePack 的目录
+							if(scriptDir && this._fs.existsSync(scriptDir)){
+								cacheBaseDir = scriptDir;
+								console.log('[translate.openai] 使用插件目录作为缓存位置：' + cacheBaseDir);
+							}
+						}catch(e){ console.warn('[translate.openai] 探测插件目录失败', e); }
+
+						// 方式2：userData 目录（传统位置）
+						if(!cacheBaseDir){
+							var userData = null;
+							try{
+								var remote = null;
+								try{ remote = require('@electron/remote'); }catch(e){}
+								if(!remote){ try{ remote = require('electron').remote; }catch(e){} }
+								if(remote && remote.app && remote.app.getPath){
+									userData = remote.app.getPath('userData');
+									this._electronRemote = remote;
+								}
+							}catch(e){}
 							if(!userData){
 								try{
-									var dirs = this._fs.readdirSync(appData);
-									for(var di=0; di<dirs.length; di++){
-										var d = this._path.join(appData, dirs[di]);
-										try{
-											var stat = this._fs.statSync(d);
-											if(!stat.isDirectory()) continue;
-										}catch(e){ continue; }
-										if(this._fs.existsSync(this._path.join(d, 'GameData')) ||
-										   this._fs.existsSync(this._path.join(d, 'ImagePack'))){
-											userData = d;
-											break;
-										}
+									var electron = require('electron');
+									if(electron && electron.app && electron.app.getPath){
+										userData = electron.app.getPath('userData');
 									}
 								}catch(e){}
 							}
+							if(!userData && process.env.APPDATA){
+								var appData = process.env.APPDATA;
+								var candidates = ['tits', 'TiTS', 'Trials in Tainted Space'];
+								for(var ci=0; ci<candidates.length; ci++){
+									var testPath = this._path.join(appData, candidates[ci]);
+									if(this._fs.existsSync(testPath)){
+										if(this._fs.existsSync(this._path.join(testPath, 'Local Storage')) ||
+										   this._fs.existsSync(this._path.join(testPath, 'GameData')) ||
+										   this._fs.existsSync(this._path.join(testPath, 'ImagePack'))){
+											userData = testPath;
+											break;
+										}
+									}
+								}
+								if(!userData){
+									try{
+										var dirs = this._fs.readdirSync(appData);
+										for(var di=0; di<dirs.length; di++){
+											var d = this._path.join(appData, dirs[di]);
+											try{
+												var stat = this._fs.statSync(d);
+												if(!stat.isDirectory()) continue;
+											}catch(e){ continue; }
+											if(this._fs.existsSync(this._path.join(d, 'GameData')) ||
+											   this._fs.existsSync(this._path.join(d, 'ImagePack'))){
+												userData = d;
+												break;
+											}
+										}
+									}catch(e){}
+								}
+							}
+							if(userData){
+								cacheBaseDir = userData;
+							}
 						}
 
-						if(userData){
-							this.dir = this._path.join(userData, 'TranslateCache');
+						if(cacheBaseDir){
+							this.dir = this._path.join(cacheBaseDir, 'TranslateCache');
 							if(!this._fs.existsSync(this.dir)){
 								this._fs.mkdirSync(this.dir, {recursive:true});
 							}
